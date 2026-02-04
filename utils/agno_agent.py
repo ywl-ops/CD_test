@@ -14,6 +14,7 @@ from agno.run.base import RunStatus
 from agno.team import Team
 from pathlib import Path
 import sys
+from loguru import logger
 
 parent_directory = Path(__file__).parent.parent
 sys.path.append(str(parent_directory))  # 注意需要转换为字符串
@@ -22,6 +23,8 @@ from agno.tools.mcp.params import StreamableHTTPClientParams,SSEClientParams
 from agno.skills import Skills, LocalSkills
 from read_toml import read_toml
 from loguru import logger
+from agno.workflow import Step, Workflow
+from agno.workflow.types import StepInput,StepOutput
 class Model:
     def __init__(self):
         config = read_toml("config.toml")
@@ -44,19 +47,43 @@ class Model:
         prompt = """
             你是一位资深软件工程师，你有代码审查的技能,如果需要,可以进行加载技能.
         """
+        prompt_summary = """
+            你是一位资深软件工程师，请对以下代码评审进行总结,对每个文件给出修改功能总结,对于问题,仅汇总高风险的问题,对于每个文件需要改进的地方,给出改进建议的代码。
+        """
         self.agent_James = Agent(
             model=self.model,
             instructions=prompt,
             markdown=True,
             skills=Skills(loaders=[LocalSkills(r"E:\data\python_project\test\codereviewskill")])
         )
-    def generate_code_review(self, single_file_diff: str,PR_number:int):
-        response:RunOutput = self.agent_James.run(f"请进行codereview,以下是变更的代码文件:{single_file_diff}")
-        for message in response.messages:
-            if message.tool_calls:
-                for tool_call in message.tool_calls:
-                    logger.debug(f"Tool: {tool_call}")  # 会显示 get_skill_instructions 等调用
-        if response.status == RunStatus.completed:
-            return response.content
-        else:
-            return "生成代码review失败"
+        self.agent_summary = Agent(
+            model=self.model,
+            instructions=prompt_summary,
+            markdown=True,
+        )
+        # 创建 Workflow
+        self.workflow = Workflow(
+            name="代码审查流程",
+            steps=[
+                Step(name="Code Review", executor=self.review_multiple_files),
+                Step(name="Summary", agent=self.agent_summary),
+            ]
+        )
+
+    def review_multiple_files(self,step_input: StepInput) -> StepOutput:
+        """让 James 审查多份代码文件"""
+        files = step_input.input  # 传入的代码文件列表
+        
+        all_reviews = []
+        for i, (filename,file_diff) in enumerate(files):
+            logger.debug(f"正在处理文件: {filename}")
+            response = self.agent_James.run(f"请进行codereview,以下是变更的代码文件:{file_diff}")
+            all_reviews.append(f"## 文件:{filename} {i+1} 审查结果:\n{response.content}")
+        
+        # 合并所有审查结果
+        combined_reviews = "\n\n".join(all_reviews)
+        return StepOutput(content=combined_reviews, success=True)
+    # 使用方式
+    def generate_code_review(self, file_diffs: list):
+        response = self.workflow.run(input=file_diffs)
+        return response.content

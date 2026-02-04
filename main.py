@@ -73,7 +73,33 @@ def truncate_patch(patch, max_length=MAX_PATCH_LENGTH):
     if len(patch) <= max_length:
         return patch
     return patch[:max_length] + "\n...（内容过长，已截断）"
-
+def intelligent_truncate_patch(patch, max_length=MAX_PATCH_LENGTH):
+    """智能截断策略，保留上下文"""
+    if len(patch) <= max_length:
+        return patch
+    
+    lines = patch.split('\n')
+    header_lines = []
+    content_lines = []
+    
+    # 分离头部信息和主要内容
+    for i, line in enumerate(lines):
+        if line.startswith('@@'):
+            header_lines = lines[:i]
+            content_lines = lines[i:]
+            break
+    
+    if not content_lines:
+        content_lines = lines
+    
+    # 优先保留头部信息
+    available_length = max_length - len('\n'.join(header_lines)) - 20  # 预留空间给提示信息
+    if available_length <= 0:
+        return '\n'.join(header_lines[:max_length//2]) + "\n...（内容过长，已截断）"
+    
+    # 智能截断主要内容
+    truncated_content = '\n'.join(content_lines)[:available_length]
+    return '\n'.join(header_lines) + truncated_content + "\n...（内容过长，已截断）"
 def process_single_file(filename, patch,PR_NUMBER,agent):
     """处理单个文件的代码审查"""
     logger.info(f"🧠 正在审查文件: {filename}")
@@ -172,27 +198,20 @@ def main():
         for file_info in filtered_patches:
             filename = file_info["filename"]
             patch = file_info["patch"]
-            logger.debug(f"正在处理文件: {filename}")
-            # 将宽泛的异常处理改为具体类型
-            try:
-                review = process_single_file(filename, patch, config['api']['PR_NUMBER'], agent)   
-                reviews_list.append((filename, review))
-            except httpx.RequestError as e:
-                logger.error(f"处理文件 {filename} 时网络请求失败: {e}")
-                reviews_list.append((filename, f"❌ 网络请求失败: {str(e)}"))
-            except Exception as e:
-                logger.error(f"处理文件 {filename} 时发生未知错误: {e}")
-                reviews_list.append((filename, f"❌ 处理此文件时发生错误: {str(e)}"))
+            # logger.debug(f"正在处理文件: {filename}")
+            patch = intelligent_truncate_patch(patch)
+            reviews_list.append([filename,patch])
+        logger.debug("汇总审查列表")
+        review_result = agent.generate_code_review(reviews_list)
         
         # 汇总所有审查结果
-        aggregated_review = aggregate_reviews(reviews_list)
-        
+        review_result = "🤖 **AI Code Review**\n\n" + review_result
         # 发布或更新评论
         post_or_update_comment(
             config['api']['REPO_FULL_NAME'], 
             config['api']['PR_NUMBER'], 
             headers, 
-            aggregated_review, 
+            review_result, 
             config['api']['COMMENT_MARKER']
         )
 
