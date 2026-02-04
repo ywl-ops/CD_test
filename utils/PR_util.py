@@ -6,9 +6,9 @@ LastEditTime: 2026-02-04
 FilePath: /test/utils/PR_util.py
 Description: 
 """
+# 文件开头只需要一次
 import httpx
-from loguru import logger
-import httpx
+import urllib.parse
 from typing import Dict, Optional
 from loguru import logger
 
@@ -34,7 +34,6 @@ def get_existing_ai_comment_id(
         
     # URL 安全构造
     try:
-        import urllib.parse
         encoded_repo = urllib.parse.quote(repo_full_name, safe='/')
         url = f"https://api.github.com/repos/{encoded_repo}/issues/{pr_number}/comments"
     except Exception:
@@ -56,12 +55,12 @@ def get_existing_ai_comment_id(
             if isinstance(comment, dict) and COMMENT_MARKER in comment.get("body", ""):
                 return comment["id"]
         return None
-    except httpx.RequestError as e:
-        logger.error(f"⚠️ HTTP 请求失败，跳过去重检查: {e}")
+    except httpx.HTTPStatusError as e:
+        logger.error(f"⚠️ GitHub API 返回错误状态码: {e.response.status_code}")
         return None
-    except KeyError as e:
-        logger.error(f"⚠️ 解析响应数据失败，跳过去重检查: {e}")
+    except httpx.TimeoutException:
+        logger.error("⚠️ 请求超时")
         return None
-    except Exception as e:
-        logger.error(f"⚠️ 获取已有评论失败，跳过去重检查: {e}")
+    except ValueError as e:  # JSON 解析错误
+        logger.error(f"⚠️ 响应格式错误: {e}")
         return None

@@ -7,20 +7,27 @@ FilePath: /test/main.py
 Description: AI驱动的PR代码审查工具
 """
 
+# 标准库导入
 import os
+
+# 第三方库导入
 from loguru import logger
 import httpx
+
+# 本地应用/库导入
 from read_toml import read_toml
 from utils.PR_util import get_existing_ai_comment_id
 from utils.agno_agent import Model
 
-
+# 在文件顶部定义常量
+MAX_PATCH_LENGTH = 40000  # 最大补丁长度
+HTTP_TIMEOUT = 30.0       # HTTP请求超时时间
 def get_pr_files(repo_full_name, pr_number, headers):
     """获取PR的所有变更文件"""
     files_url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}/files"
     
     try:
-        resp = httpx.get(files_url, headers=headers, timeout=30.0)
+        resp = httpx.get(files_url, headers=headers, timeout=HTTP_TIMEOUT)
         if resp.status_code != 200:
             logger.error(f"❌ 获取文件列表失败: {resp.text}")
             return None
@@ -61,7 +68,7 @@ def filter_code_patches(files,CODE_EXTENSIONS):
     
     return filtered_patches
 
-def truncate_patch(patch, max_length=40000):
+def truncate_patch(patch, max_length=MAX_PATCH_LENGTH):
     """截断单个文件补丁内容，避免超出API限制"""
     if len(patch) <= max_length:
         return patch
@@ -166,12 +173,16 @@ def main():
             filename = file_info["filename"]
             patch = file_info["patch"]
             logger.debug(f"正在处理文件: {filename}")
-            try:
-                review = process_single_file(filename, patch, config['api']['PR_NUMBER'], agent)   
-                reviews_list.append((filename, review))
-            except Exception as e:
-                logger.error(f"处理文件 {filename} 时发生错误: {e}")
-                reviews_list.append((filename, f"❌ 处理此文件时发生错误: {str(e)}"))
+        # 将宽泛的异常处理改为具体类型
+        try:
+            review = process_single_file(filename, patch, config['api']['PR_NUMBER'], agent)   
+            reviews_list.append((filename, review))
+        except httpx.RequestError as e:
+            logger.error(f"处理文件 {filename} 时网络请求失败: {e}")
+            reviews_list.append((filename, f"❌ 网络请求失败: {str(e)}"))
+        except Exception as e:
+            logger.error(f"处理文件 {filename} 时发生未知错误: {e}")
+            reviews_list.append((filename, f"❌ 处理此文件时发生错误: {str(e)}"))
         
         # 汇总所有审查结果
         aggregated_review = aggregate_reviews(reviews_list)
