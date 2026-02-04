@@ -41,6 +41,9 @@ class Model:
 
             请用中文回答，每条意见以"\\n- [类型] 描述"格式列出。若无问题，回复"✅ 未发现明显问题
         """
+        prompt = """
+            你是一位资深软件工程师，你有代码审查的技能,如果需要,可以进行加载技能。
+        """
         self.agent_James = Agent(
             model=self.model,
             instructions=prompt,

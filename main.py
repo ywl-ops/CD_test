@@ -8,33 +8,12 @@ Description: AI驱动的PR代码审查工具
 """
 
 import os
-import logging
+from loguru import logger
 import httpx
 from read_toml import read_toml
-from utils.qwen import get_diff
 from utils.PR_util import get_existing_ai_comment_id
 from utils.agno_agent import Model
 
-# 配置日志
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-config = read_toml("config.toml")
-if config is None:
-    logger.error("无法加载配置文件，程序退出")
-    exit(1)
-
-# 常见代码文件扩展名（可按需扩展）
-CODE_EXTENSIONS = {
-    '.py', '.js', '.ts', '.jsx', '.tsx', '.java', '.go', '.rs', '.cpp', '.cc', '.cxx',
-    '.h', '.hpp', '.cs', '.rb', '.php', '.swift', '.kt', '.kts', '.scala', '.lua',
-    '.pl', '.sh', '.bash', '.zsh', '.ps1', '.sql', '.yaml', '.yml', '.json', '.toml',
-    '.xml', '.html', '.css', '.scss', '.less', '.proto', '.dockerfile'
-}
-
-headers = {"Authorization": f"token {config['api']['GITHUB_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
-
-logger.info(f"🔍 正在分析 PR #{config['api']['PR_NUMBER']} 的变更文件...")
 
 def get_pr_files(repo_full_name, pr_number, headers):
     """获取PR的所有变更文件"""
@@ -51,7 +30,7 @@ def get_pr_files(repo_full_name, pr_number, headers):
         logger.error(f"请求PR文件时发生错误: {e}")
         return None
 
-def filter_code_patches(files):
+def filter_code_patches(files,CODE_EXTENSIONS):
     """过滤出需要审查的代码补丁"""
     filtered_patches = []
     
@@ -72,7 +51,7 @@ def filter_code_patches(files):
             continue
 
         if not patch.strip():
-            logger.info(f"跳过空变更文件: {filename}")
+            logger.info(f"📄 跳过空变更文件: {filename}")
             continue
 
         filtered_patches.append({
@@ -82,17 +61,17 @@ def filter_code_patches(files):
     
     return filtered_patches
 
-def truncate_patch(patch, max_length=4000):
+def truncate_patch(patch, max_length=40000):
     """截断单个文件补丁内容，避免超出API限制"""
     if len(patch) <= max_length:
         return patch
     return patch[:max_length] + "\n...（内容过长，已截断）"
 
-def process_single_file(filename, patch, api_key,agent):
+def process_single_file(filename, patch,PR_NUMBER,agent):
     """处理单个文件的代码审查"""
     logger.info(f"🧠 正在审查文件: {filename}")
     truncated_patch = truncate_patch(patch)
-    review_result = agent.generate_code_review(truncated_patch,config['api']['PR_NUMBER'])
+    review_result = agent.generate_code_review(truncated_patch,PR_NUMBER)
 
     return review_result
 
@@ -152,12 +131,23 @@ def post_or_update_comment(repo_full_name, pr_number, headers, review_body, comm
             logger.error(f"发布评论时发生错误: {e}")
 
 def main():
+    config = read_toml("config.toml")
+    if config is None:
+        logger.error("无法加载配置文件，程序退出")
+        return
+    # 常见代码文件扩展名（可按需扩展）
+    CODE_EXTENSIONS = config['api']['CODE_EXTENSIONS']
+
+    headers = {"Authorization": f"token {config['api']['GITHUB_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
+
+    logger.info(f"🔍 正在分析 PR #{config['api']['PR_NUMBER']} 的变更文件...")
+
     files = get_pr_files(config['api']['REPO_FULL_NAME'], config['api']['PR_NUMBER'], headers)
     if files is None:
         logger.error("无法获取PR文件列表，程序退出")
-        exit(1)
+        return
 
-    filtered_patches = filter_code_patches(files)
+    filtered_patches = filter_code_patches(files,CODE_EXTENSIONS)
     agent = Model()
     if not filtered_patches:
         review_comment = "🤖 **AI Code Review**\n\n✅ 本次 PR 未包含可审查的代码文件（已跳过 .md/.txt 等非代码文件）。"
@@ -177,7 +167,7 @@ def main():
             patch = file_info["patch"]
             logger.debug(f"正在处理文件: {filename}")
             try:
-                review = process_single_file(filename, patch, config['api']['DASHSCOPE_API_KEY'],agent)
+                review = process_single_file(filename, patch,1,agent)
                 reviews_list.append((filename, review))
             except Exception as e:
                 logger.error(f"处理文件 {filename} 时发生错误: {e}")
