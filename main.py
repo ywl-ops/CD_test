@@ -4,33 +4,24 @@ Date: 2026-02-04
 LastEditors: ywl-ops 2644984438@qq.com
 LastEditTime: 2026-02-04
 FilePath: /test/main.py
-Description: 
+Description: AI驱动的PR代码审查工具
 """
+
 import os
+import logging
 import httpx
-COMMENT_MARKER = "🤖 **AI Code Review"  # 用于识别是否已有 AI 评论
+from read_toml import read_toml
+from utils.qwen import get_diff
+from utils.PR_util import get_existing_ai_comment_id
 
-def get_existing_ai_comment_id(repo_full_name: str, pr_number: int) -> int | None:
-    """检查是否存在 AI 评论，若存在返回 comment_id，否则返回 None"""
-    url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
-    resp = httpx.get(url, headers=headers)
-    if resp.status_code != 200:
-        print("⚠️ 获取已有评论失败，跳过去重检查")
-        return None
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-    comments = resp.json()
-    for comment in comments:
-        if COMMENT_MARKER in comment.get("body", ""):
-            return comment["id"]  # 返回 comment_id
-    return None
-
-# 配置
-
-
-# ===== 你要修改的部分 =====
-REPO_FULL_NAME = "ywl-ops/CD_test"  # 替换成你的仓库，如 "alibaba/Qwen"
-PR_NUMBER = 2                      # 替换成你的 PR 编号
-# =========================
+config = read_toml("config.toml")
+if config is None:
+    logger.error("无法加载配置文件，程序退出")
+    exit(1)
 
 # 常见代码文件扩展名（可按需扩展）
 CODE_EXTENSIONS = {
@@ -40,105 +31,167 @@ CODE_EXTENSIONS = {
     '.xml', '.html', '.css', '.scss', '.less', '.proto', '.dockerfile'
 }
 
-headers = {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+headers = {"Authorization": f"token {config['api']['GITHUB_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
 
-print(f"🔍 正在分析 PR #{PR_NUMBER} 的变更文件...")
+logger.info(f"🔍 正在分析 PR #{config['api']['PR_NUMBER']} 的变更文件...")
 
-# 1. 获取 PR 的所有变更文件
-files_url = f"https://api.github.com/repos/{REPO_FULL_NAME}/pulls/{PR_NUMBER}/files"
-resp = httpx.get(files_url, headers=headers)
-if resp.status_code != 200:
-    print("❌ 获取文件列表失败:", resp.text)
-    exit(1)
-
-files = resp.json()
-filtered_patches = []
-
-for f in files:
-    filename = f["filename"]
-    status = f.get("status", "")
-    patch = f.get("patch", "")
-
-    # 跳过删除的文件
-    if status == "removed":
-        print(f"🗑️ 跳过已删除文件: {filename}")
-        continue
-
-    # 判断是否为代码文件
-    _, ext = os.path.splitext(filename.lower())
-    if ext not in CODE_EXTENSIONS:
-        print(f"📄 跳过非代码文件: {filename}")
-        continue
-
-    if not patch.strip():
-        print(f"EmptyEntries 跳过空变更文件: {filename}")
-        continue
-
-    filtered_patches.append(f"--- {filename} ---\n{patch}")
-
-if not filtered_patches:
-    review_comment = "🤖 **AI Code Review**\n\n✅ 本次 PR 未包含可审查的代码文件（已跳过 .md/.txt 等非代码文件）。"
-else:
-    full_diff = "\n\n".join(filtered_patches)
+def get_pr_files(repo_full_name, pr_number, headers):
+    """获取PR的所有变更文件"""
+    files_url = f"https://api.github.com/repos/{repo_full_name}/pulls/{pr_number}/files"
     
-    # 截断过长内容（Qwen 上下文限制）
-    if len(full_diff) > 12000:
-        full_diff = full_diff[:12000] + "\n...（内容过长，已截断）"
+    try:
+        resp = httpx.get(files_url, headers=headers, timeout=30.0)
+        if resp.status_code != 200:
+            logger.error(f"❌ 获取文件列表失败: {resp.text}")
+            return None
+        
+        return resp.json()
+    except httpx.RequestError as e:
+        logger.error(f"请求PR文件时发生错误: {e}")
+        return None
 
-prompt = f"""
-    你是一位资深软件工程师，请对以下代码变更进行审查。关注：
-    - 潜在 bug（空指针、越界、资源泄漏等）
-    - 安全风险（硬编码密钥、SQL 注入等）
-    - 代码风格、可读性、可维护性
-    - 性能问题
-    - 是否符合最佳实践
+def filter_code_patches(files):
+    """过滤出需要审查的代码补丁"""
+    filtered_patches = []
+    
+    for f in files:
+        filename = f["filename"]
+        status = f.get("status", "")
+        patch = f.get("patch", "")
 
-    请用中文回答，每条意见以“- [类型] 描述”格式列出。若无问题，回复“✅ 未发现明显问题”。
+        # 跳过删除的文件
+        if status == "removed":
+            logger.info(f"🗑️ 跳过已删除文件: {filename}")
+            continue
 
-    以下是变更的代码文件：
+        # 判断是否为代码文件
+        _, ext = os.path.splitext(filename.lower())
+        if ext not in CODE_EXTENSIONS:
+            logger.info(f"📄 跳过非代码文件: {filename}")
+            continue
 
-    {full_diff}
-"""
+        if not patch.strip():
+            logger.info(f"EmptyEntries 跳过空变更文件: {filename}")
+            continue
 
-print("🧠 正在调用 Qwen 进行 Code Review...")
-qwen_resp = httpx.post(
-    "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation",
-    headers={
-        "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
-        "Content-Type": "application/json"
-    },
-    json={
-        "model": "qwen-max",
-        "input": {"messages": [{"role": "user", "content": prompt}]},
-        "parameters": {"result_format": "message"}
-    },
-    timeout=60.0
-)
+        filtered_patches.append({
+            "filename": filename,
+            "patch": f"--- {filename} ---\n{patch}"
+        })
+    
+    return filtered_patches
 
-if qwen_resp.status_code != 200:
-    print("❌ Qwen 调用失败:", qwen_resp.text)
-    exit(1)
+def truncate_patch(patch, max_length=4000):
+    """截断单个文件补丁内容，避免超出API限制"""
+    if len(patch) <= max_length:
+        return patch
+    return patch[:max_length] + "\n...（内容过长，已截断）"
 
-    review_text = qwen_resp.json()["output"]["choices"][0]["message"]["content"]
-    review_body = f"{COMMENT_MARKER} (by Qwen)\n\n{review_text}"
+def process_single_file(filename, patch, api_key):
+    """处理单个文件的代码审查"""
+    logger.info(f"🧠 正在审查文件: {filename}")
+    truncated_patch = truncate_patch(patch)
+    review_result = get_diff(truncated_patch, api_key)
+    return review_result
 
-# 3. 检查是否已有 AI 评论
-existing_comment_id = get_existing_ai_comment_id(REPO_FULL_NAME, PR_NUMBER)
+def aggregate_reviews(reviews_list):
+    """聚合所有文件的审查结果"""
+    if not reviews_list:
+        return "🤖 **AI Code Review**\n\n✅ 本次 PR 未包含可审查的代码文件（已跳过 .md/.txt 等非代码文件）。"
+    
+    aggregated_review = "🤖 **AI Code Review**\n\n"
+    aggregated_review += "以下是针对各个文件的代码审查意见：\n\n"
+    
+    for i, (filename, review) in enumerate(reviews_list, 1):
+        if review and review.strip():
+            # 移除原有的标记头，因为我们会在汇总中添加
+            clean_review = review.replace("🤖 **AI Code Review (by Qwen)**\n\n", "").strip()
+            aggregated_review += f"### 文件: `{filename}`\n{clean_review}\n\n"
+        else:
+            aggregated_review += f"### 文件: `{filename}`\n✅ 该文件未发现问题\n\n"
+    
+    return aggregated_review
 
-if existing_comment_id:
-    print("🔄 已存在 AI 评论，正在更新...")
-    # 方式一：【推荐】直接更新旧评论（避免刷屏）
-    update_url = f"https://api.github.com/repos/{REPO_FULL_NAME}/comments/{existing_comment_id}"
-    update_resp = httpx.patch(update_url, headers=headers, json={"body": review_body})
-    if update_resp.status_code == 200:
-        print("✅ AI 评论已更新！")
+def post_or_update_comment(repo_full_name, pr_number, headers, review_body, comment_marker):
+    """发布或更新评论"""
+    # 检查是否已有 AI 评论
+    existing_comment_id = get_existing_ai_comment_id(repo_full_name, pr_number, headers, comment_marker)
+    
+    # 确保 body 不为空、不只含空白
+    if not review_body or not review_body.strip():
+        review_body = "🤖 **AI Code Review**\n\n⚠️ 无法生成审查意见（内容为空或仅包含空白字符）。请检查 PR 变更或重试。"
     else:
-        print("❌ 更新失败:", update_resp.text)
-else:
-    print("🆕 未发现已有 AI 评论，正在创建新评论...")
-    comment_url = f"https://api.github.com/repos/{REPO_FULL_NAME}/issues/{PR_NUMBER}/comments"
-    post_resp = httpx.post(comment_url, headers=headers, json={"body": review_body})
-    if post_resp.status_code in (200, 201):
-        print("✅ AI 评论已成功发布！")
+        review_body = review_body.strip()  # 清理首尾空白
+    
+    if existing_comment_id:
+        logger.info("🔄 已存在 AI 评论，正在更新...")
+        # 直接更新旧评论（避免刷屏）
+        update_url = f"https://api.github.com/repos/{repo_full_name}/issues/comments/{existing_comment_id}"
+        
+        try:
+            update_resp = httpx.patch(update_url, headers=headers, json={"body": review_body}, timeout=30.0)
+            if update_resp.status_code == 200:
+                logger.info("✅ AI 评论已更新！")
+            else:
+                logger.error(f"❌ 更新失败: {update_resp.text}")
+        except httpx.RequestError as e:
+            logger.error(f"更新评论时发生错误: {e}")
     else:
-        print("❌ 发布评论失败:", post_resp.text)
+        logger.info("🆕 未发现已有 AI 评论，正在创建新评论...")
+        comment_url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
+        
+        try:
+            post_resp = httpx.post(comment_url, headers=headers, json={"body": review_body}, timeout=30.0)
+            if post_resp.status_code in (200, 201):
+                logger.info("✅ AI 评论已成功发布！")
+            else:
+                logger.error(f"❌ 发布评论失败: {post_resp.text}")
+        except httpx.RequestError as e:
+            logger.error(f"发布评论时发生错误: {e}")
+
+def main():
+    files = get_pr_files(config['api']['REPO_FULL_NAME'], config['api']['PR_NUMBER'], headers)
+    if not files:
+        logger.error("无法获取PR文件列表，程序退出")
+        exit(1)
+
+    filtered_patches = filter_code_patches(files)
+
+    if not filtered_patches:
+        review_comment = "🤖 **AI Code Review**\n\n✅ 本次 PR 未包含可审查的代码文件（已跳过 .md/.txt 等非代码文件）。"
+        post_or_update_comment(
+            config['api']['REPO_FULL_NAME'], 
+            config['api']['PR_NUMBER'], 
+            headers, 
+            review_comment, 
+            config['api']['COMMENT_MARKER']
+        )
+    else:
+        # 对每个文件单独进行代码审查
+        reviews_list = []
+        
+        for file_info in filtered_patches:
+            filename = file_info["filename"]
+            patch = file_info["patch"]
+            logger.debug(f"正在处理文件: {filename}")
+            try:
+                review = process_single_file(filename, patch, config['api']['DASHSCOPE_API_KEY'])
+                reviews_list.append((filename, review))
+            except Exception as e:
+                logger.error(f"处理文件 {filename} 时发生错误: {e}")
+                reviews_list.append((filename, f"❌ 处理此文件时发生错误: {str(e)}"))
+        
+        # 汇总所有审查结果
+        aggregated_review = aggregate_reviews(reviews_list)
+        
+        # 发布或更新评论
+        post_or_update_comment(
+            config['api']['REPO_FULL_NAME'], 
+            config['api']['PR_NUMBER'], 
+            headers, 
+            aggregated_review, 
+            config['api']['COMMENT_MARKER']
+        )
+
+if __name__ == "__main__":
+    main()
