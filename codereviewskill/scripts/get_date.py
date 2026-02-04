@@ -1,30 +1,46 @@
 """
-Author: ywl-ops 2644984438@qq.com
-Date: 2026-02-04
-LastEditors: ywl-ops 2644984438@qq.com
-LastEditTime: 2026-02-04
-FilePath: /test/codereviewskill/scripts/get_date.py
-Description: 
+获取当前日期和时间的工具函数
 """
-#!/usr/bin/env python3
-"""获取当前日期和时间"""
-
 from datetime import datetime
 import sys
 
+
 def get_current_date(format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
+    """
+    获取当前日期和时间
+    
+    Args:
+        format_str: 日期格式字符串，默认为 "%Y-%m-%d %H:%M:%S"
+    
+    Returns:
+        格式化后的当前日期时间字符串
+        
+    Raises:
+        ValueError: 当格式字符串无效时
+    """
+    if not isinstance(format_str, str):
+        raise TypeError("Format string must be a string")
+    
     try:
         return datetime.now().strftime(format_str)
     except ValueError as e:
-        print(f"Error: Invalid date format '{format_str}'", file=sys.stderr)
-        raise
+        raise ValueError(f"Invalid date format '{format_str}': {str(e)}")
 
-if __name__ == "__main__":
+
+def main():
+    """主函数，处理命令行调用"""
     default_format = "%Y-%m-%d %H:%M:%S"
     format_arg = sys.argv[1] if len(sys.argv) > 1 else default_format
+    
     try:
-        print(get_current_date(format_arg))
-    except ValueError:
+        result = get_current_date(format_arg)
+        print(result)
+    except (ValueError, TypeError) as e:
+        print(f"Error: {e}", file=sys.stderr)
         print("Usage: python get_date.py [date_format]", file=sys.stderr)
-        print(f"Example: python get_date.py '%Y-%m-%d'", file=sys.stderr)
+        print("Example: python get_date.py '%Y-%m-%d'", file=sys.stderr)
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

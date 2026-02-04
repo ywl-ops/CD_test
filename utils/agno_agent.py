@@ -22,6 +22,7 @@ from agno.tools.mcp.params import StreamableHTTPClientParams,SSEClientParams
 from agno.skills import Skills, LocalSkills
 from read_toml import read_toml
 from loguru import logger
+from codereviewskill.scripts.get_date import get_current_date
 class Model:
     def __init__(self):
         config = read_toml("config.toml")
@@ -42,12 +43,13 @@ class Model:
             请用中文回答，每条意见以"\\n- [类型] 描述"格式列出。若无问题，回复"✅ 未发现明显问题
         """
         prompt = """
-            你是一位资深软件工程师，你有代码审查的技能,如果需要,可以进行加载技能。
+            你是一位资深软件工程师，你有代码审查的技能,如果需要,可以进行加载技能。如果需要时间信息,可以使用get_current_date函数s
         """
         self.agent_James = Agent(
             model=self.model,
             instructions=prompt,
             markdown=True,
+            tools=[get_current_date],
             skills=Skills(loaders=[LocalSkills(r"E:\data\python_project\test\codereviewskill")])
         )
     def generate_code_review(self, single_file_diff: str,PR_number:int):

@@ -117,7 +117,7 @@ def post_or_update_comment(repo_full_name, pr_number, headers, review_body, comm
         update_url = f"https://api.github.com/repos/{repo_full_name}/issues/comments/{existing_comment_id}"
         
         try:
-            update_resp = httpx.patch(update_url, headers=headers, json={"body": review_body}, timeout=30.0)
+            update_resp = httpx.patch(update_url, headers=headers, json={"body": review_body}, timeout=HTTP_TIMEOUT)
             if update_resp.status_code == 200:
                 logger.info("✅ AI 评论已更新！")
             else:
@@ -145,7 +145,7 @@ def main():
     # 常见代码文件扩展名（可按需扩展）
     CODE_EXTENSIONS = config['api']['CODE_EXTENSIONS']
 
-    headers = {"Authorization": f"token {config['api']['GITHUB_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
+    headers = {"Authorization": f"Bearer {config['api']['GITHUB_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
 
     logger.info(f"🔍 正在分析 PR #{config['api']['PR_NUMBER']} 的变更文件...")
 
