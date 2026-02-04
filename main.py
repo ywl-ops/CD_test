@@ -173,16 +173,16 @@ def main():
             filename = file_info["filename"]
             patch = file_info["patch"]
             logger.debug(f"正在处理文件: {filename}")
-        # 将宽泛的异常处理改为具体类型
-        try:
-            review = process_single_file(filename, patch, config['api']['PR_NUMBER'], agent)   
-            reviews_list.append((filename, review))
-        except httpx.RequestError as e:
-            logger.error(f"处理文件 {filename} 时网络请求失败: {e}")
-            reviews_list.append((filename, f"❌ 网络请求失败: {str(e)}"))
-        except Exception as e:
-            logger.error(f"处理文件 {filename} 时发生未知错误: {e}")
-            reviews_list.append((filename, f"❌ 处理此文件时发生错误: {str(e)}"))
+            # 将宽泛的异常处理改为具体类型
+            try:
+                review = process_single_file(filename, patch, config['api']['PR_NUMBER'], agent)   
+                reviews_list.append((filename, review))
+            except httpx.RequestError as e:
+                logger.error(f"处理文件 {filename} 时网络请求失败: {e}")
+                reviews_list.append((filename, f"❌ 网络请求失败: {str(e)}"))
+            except Exception as e:
+                logger.error(f"处理文件 {filename} 时发生未知错误: {e}")
+                reviews_list.append((filename, f"❌ 处理此文件时发生错误: {str(e)}"))
         
         # 汇总所有审查结果
         aggregated_review = aggregate_reviews(reviews_list)

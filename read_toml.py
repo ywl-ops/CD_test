@@ -9,16 +9,29 @@ Description:
 import tomli as tomllib
 # 读取TOML文件
 def read_toml(file_path):
+    """
+    读取并解析 TOML 配置文件
+    
+    Args:
+        file_path (str): TOML 文件路径
+        
+    Returns:
+        dict: 解析后的配置数据，出错时返回 None
+    """
     try:
-        with open(file_path, "rb") as f:  # 注意用rb模式（二进制）
+        with open(file_path, 'rb') as f:
             data = tomllib.load(f)
         return data
     except FileNotFoundError:
         print(f"配置文件不存在：{file_path}")
-        return None
+        return {"error": "file_not_found", "path": file_path}
     except tomllib.TOMLDecodeError as e:
         print(f"TOML解析失败：{e}")
-        return None
+        return {"error": "parse_error", "message": str(e)}
+    except PermissionError:
+        print(f"无权限访问配置文件：{file_path}")
+        return {"error": "permission_denied", "path": file_path}
     except Exception as e:
         print(f"读取TOML失败：{e}")
-        return None
+        return {"error": "unknown", "message": str(e)}
+    

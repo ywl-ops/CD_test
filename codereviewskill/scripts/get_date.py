@@ -13,8 +13,18 @@ from datetime import datetime
 import sys
 
 def get_current_date(format_str: str = "%Y-%m-%d %H:%M:%S") -> str:
-    return datetime.now().strftime(format_str)
+    try:
+        return datetime.now().strftime(format_str)
+    except ValueError as e:
+        print(f"Error: Invalid date format '{format_str}'", file=sys.stderr)
+        raise
 
 if __name__ == "__main__":
-    format_arg = sys.argv[1] if len(sys.argv) > 1 else "%Y-%m-%d %H:%M:%S"
-    print(get_current_date(format_arg))
+    default_format = "%Y-%m-%d %H:%M:%S"
+    format_arg = sys.argv[1] if len(sys.argv) > 1 else default_format
+    try:
+        print(get_current_date(format_arg))
+    except ValueError:
+        print("Usage: python get_date.py [date_format]", file=sys.stderr)
+        print(f"Example: python get_date.py '%Y-%m-%d'", file=sys.stderr)
+        sys.exit(1)
