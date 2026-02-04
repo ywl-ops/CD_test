@@ -28,7 +28,8 @@ def get_existing_ai_comment_id(
         pr_number: PR 编号
         headers: API 请求头，包含认证信息
         comment_marker: 用于识别 AI 评论的标记文本
-        
+        timeout: 请求超时时间（秒），默认10.0
+
     Returns:
         int | None: 找到的评论 ID，未找到则返回 None
     """

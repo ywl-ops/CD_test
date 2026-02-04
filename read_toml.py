@@ -7,31 +7,31 @@ FilePath: /test/read_toml.py
 Description: 
 """
 import tomli as tomllib
+from loguru import logger
 # 读取TOML文件
 def read_toml(file_path):
-    """
-    读取并解析 TOML 配置文件
+    """读取并解析 TOML 配置文件
     
     Args:
         file_path (str): TOML 文件路径
         
     Returns:
-        dict: 解析后的配置数据，出错时返回 None
+        dict: 解析后的配置数据，出错时返回包含错误信息的字典
     """
     try:
         with open(file_path, 'rb') as f:
             data = tomllib.load(f)
         return data
     except FileNotFoundError:
-        print(f"配置文件不存在：{file_path}")
+        logger.error(f"配置文件不存在：{file_path}")
         return {"error": "file_not_found", "path": file_path}
     except tomllib.TOMLDecodeError as e:
-        print(f"TOML解析失败：{e}")
+        logger.error(f"TOML解析失败：{e}")
         return {"error": "parse_error", "message": str(e)}
     except PermissionError:
-        print(f"无权限访问配置文件：{file_path}")
+        logger.error(f"无权限访问配置文件：{file_path}")
         return {"error": "permission_denied", "path": file_path}
     except Exception as e:
-        print(f"读取TOML失败：{e}")
+        logger.error(f"读取TOML失败：{e}")
         return {"error": "unknown", "message": str(e)}
     

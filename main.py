@@ -129,7 +129,7 @@ def post_or_update_comment(repo_full_name, pr_number, headers, review_body, comm
         comment_url = f"https://api.github.com/repos/{repo_full_name}/issues/{pr_number}/comments"
         
         try:
-            post_resp = httpx.post(comment_url, headers=headers, json={"body": review_body}, timeout=30.0)
+            post_resp = httpx.post(comment_url, headers=headers, json={"body": review_body}, timeout=HTTP_TIMEOUT)
             if post_resp.status_code in (200, 201):
                 logger.info("✅ AI 评论已成功发布！")
             else:
