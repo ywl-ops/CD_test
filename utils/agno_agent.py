@@ -26,7 +26,7 @@ class Model:
     def __init__(self):
         config = read_toml("config.toml")
         self.model = OpenAILike(
-            id="qwen3-max",
+            id="qwen3-coder-plus",
             api_key=config["api"]["DASHSCOPE_API_KEY"],
             base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
         )

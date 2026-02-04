@@ -14,7 +14,10 @@ def read_toml(file_path):
             data = tomllib.load(f)
         return data
     except FileNotFoundError:
-        print(f"错误：文件 {file_path} 不存在")
+        print(f"配置文件不存在：{file_path}")
+        return None
+    except tomllib.TOMLDecodeError as e:
+        print(f"TOML解析失败：{e}")
         return None
     except Exception as e:
         print(f"读取TOML失败：{e}")

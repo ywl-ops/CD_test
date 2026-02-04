@@ -167,7 +167,7 @@ def main():
             patch = file_info["patch"]
             logger.debug(f"正在处理文件: {filename}")
             try:
-                review = process_single_file(filename, patch,1,agent)
+                review = process_single_file(filename, patch, config['api']['PR_NUMBER'], agent)   
                 reviews_list.append((filename, review))
             except Exception as e:
                 logger.error(f"处理文件 {filename} 时发生错误: {e}")
