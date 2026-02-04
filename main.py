@@ -13,6 +13,7 @@ import httpx
 from read_toml import read_toml
 from utils.qwen import get_diff
 from utils.PR_util import get_existing_ai_comment_id
+from utils.agno_agent import Model
 
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -71,7 +72,7 @@ def filter_code_patches(files):
             continue
 
         if not patch.strip():
-            logger.info(f"EmptyEntries 跳过空变更文件: {filename}")
+            logger.info(f"跳过空变更文件: {filename}")
             continue
 
         filtered_patches.append({
@@ -87,11 +88,12 @@ def truncate_patch(patch, max_length=4000):
         return patch
     return patch[:max_length] + "\n...（内容过长，已截断）"
 
-def process_single_file(filename, patch, api_key):
+def process_single_file(filename, patch, api_key,agent):
     """处理单个文件的代码审查"""
     logger.info(f"🧠 正在审查文件: {filename}")
     truncated_patch = truncate_patch(patch)
-    review_result = get_diff(truncated_patch, api_key)
+    review_result = agent.generate_code_review(truncated_patch,config['api']['PR_NUMBER'])
+
     return review_result
 
 def aggregate_reviews(reviews_list):
@@ -151,12 +153,12 @@ def post_or_update_comment(repo_full_name, pr_number, headers, review_body, comm
 
 def main():
     files = get_pr_files(config['api']['REPO_FULL_NAME'], config['api']['PR_NUMBER'], headers)
-    if not files:
+    if files is None:
         logger.error("无法获取PR文件列表，程序退出")
         exit(1)
 
     filtered_patches = filter_code_patches(files)
-
+    agent = Model()
     if not filtered_patches:
         review_comment = "🤖 **AI Code Review**\n\n✅ 本次 PR 未包含可审查的代码文件（已跳过 .md/.txt 等非代码文件）。"
         post_or_update_comment(
@@ -175,7 +177,7 @@ def main():
             patch = file_info["patch"]
             logger.debug(f"正在处理文件: {filename}")
             try:
-                review = process_single_file(filename, patch, config['api']['DASHSCOPE_API_KEY'])
+                review = process_single_file(filename, patch, config['api']['DASHSCOPE_API_KEY'],agent)
                 reviews_list.append((filename, review))
             except Exception as e:
                 logger.error(f"处理文件 {filename} 时发生错误: {e}")
